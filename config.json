@@ -1,0 +1,65 @@
+{
+  "monitoring_interval_seconds": 30,
+  "dashboard_port": 5000,
+
+  "email": {
+    "enabled": true,
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "sender": "your_email@gmail.com",
+    "password": "YOUR_APP_PASSWORD",
+    "recipients": ["manager@company.com", "technician@company.com"],
+    "cooldown_minutes": 30
+  },
+
+  "machines": [
+    {
+      "id": "CNC-01",
+      "name": "CNC-01",
+      "type": "CNC",
+      "line": "خط A",
+      "ip": "192.168.1.101",
+      "sensors": 3,
+      "health_threshold_warning": 70,
+      "health_threshold_danger": 50,
+      "temp_max": 80,
+      "vibration_max": 2.5
+    },
+    {
+      "id": "PRESS-02",
+      "name": "PRESS-02",
+      "type": "مكبس",
+      "line": "خط A",
+      "ip": "192.168.1.102",
+      "sensors": 3,
+      "health_threshold_warning": 65,
+      "health_threshold_danger": 45,
+      "temp_max": 75,
+      "vibration_max": 3.0
+    },
+    {
+      "id": "MILL-04",
+      "name": "MILL-04",
+      "type": "طاحونة",
+      "line": "خط B",
+      "ip": "192.168.1.104",
+      "sensors": 3,
+      "health_threshold_warning": 70,
+      "health_threshold_danger": 50,
+      "temp_max": 85,
+      "vibration_max": 2.0
+    },
+    {
+      "id": "WELD-05",
+      "name": "WELD-05",
+      "type": "لحام",
+      "line": "خط B",
+      "ip": "192.168.1.105",
+      "sensors": 3,
+      "health_threshold_warning": 70,
+      "health_threshold_danger": 50,
+      "temp_max": 90,
+      "vibration_max": 1.5
+    }
+  ]
+}

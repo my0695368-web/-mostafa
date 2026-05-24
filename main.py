@@ -1,125 +1,136 @@
 """
-CVFPM - Collective Vibration Fingerprint for Predictive Maintenance
-نظام الصيانة التنبؤية الذكي
-المطور: Mostafa Eisaa | 775166114
-تشغيل: python main.py
+CVFPM - الملف الرئيسي للنظام (النسخة السحابية المستقرة)
+المطور: Mostafa Eisaa
+التعديل: دعم التشغيل الهجين (حقيقي/محاكاة) والتوافق الكامل مع Render
 """
 
 import json, time, threading, logging, os, signal, sys
 from datetime import datetime
+
+# استيراد مكونات النظام
 from sensor_reader import SensorReader
 from ai_engine import AIEngine
 from alert_system import AlertSystem
 from web_dashboard import create_app
 
+# إعداد السجلات (Logging)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler('cvfpm.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
+# تحديد مسار ملف الإعدادات
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 
 def load_config():
+    """تحميل الإعدادات من ملف JSON"""
+    if not os.path.exists(CONFIG_FILE):
+        # إعدادات افتراضية في حال فقدان الملف
+        return {
+            "monitoring_interval_seconds": 10,
+            "dashboard_port": 5000,
+            "machines": [{"id": "DEFAULT", "name": "ماكينة افتراضية", "type": "Test"}]
+        }
     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 def monitoring_loop(config_ref, ai_engine, alert_system, shared_state, stop_event):
-    """حلقة المراقبة الرئيسية — تدعم hot reload للإعدادات"""
+    """حلقة المراقبة الرئيسية"""
+    # تهيئة قارئ الحساسات (سيكتشف تلقائياً إذا كان هناك حساسات أم لا)
     sensor_reader = SensorReader(config_ref[0])
+    
+    logging.info(f"وضع العمل الحالي: {sensor_reader.source_label}")
 
     while not stop_event.is_set():
-        config = config_ref[0]          # ← يقرأ الإعدادات المحدّثة دائماً
-        interval = config.get('monitoring_interval_seconds', 30)
+        config = config_ref[0]
+        interval = config.get('monitoring_interval_seconds', 10)
 
         try:
-            for machine in config['machines']:
+            for machine in config.get('machines', []):
                 mid = machine['id']
+                # قراءة البيانات (إما حقيقية أو محاكاة ذكية)
                 data = sensor_reader.read(machine)
 
-                if data is None:
-                    logging.warning(f"لم يتم قراءة بيانات {mid}")
-                    continue
+                if data is None: continue
 
+                # تحليل البيانات بواسطة محرك الذكاء الاصطناعي
                 result = ai_engine.analyze(mid, data)
 
+                # تحديث الحالة المشتركة التي تظهر على لوحة التحكم
                 shared_state['machines'][mid] = {
-                    'name':       machine['name'],
-                    'type':       machine['type'],
-                    'line':       machine['line'],
-                    'ip':         machine['ip'],
-                    'health':     round(result['health'], 1),
-                    'rul_days':   round(result['rul_days'], 1),
-                    'status':     result['status'],
-                    'temp':       round(data.get('temp', 0), 1),
-                    'vibration':  round(data.get('vibration_rms', 0), 3),
+                    'name':       machine.get('name', mid),
+                    'health':     result.get('health', 100),
+                    'rul_days':   result.get('rul_days', 0),
+                    'status':     result.get('status', 'ok'),
+                    'temp':       data.get('temp', 0),
+                    'vibration':  data.get('vibration_rms', 0),
+                    'source':     data.get('source', 'Unknown'),
+                    'is_simulated': data.get('is_simulated', True),
                     'last_update': datetime.now().strftime('%H:%M:%S')
                 }
 
-                if result['status'] in ('danger', 'warning'):
+                # تفعيل التنبيهات إذا كانت الحالة خطر أو تحذير
+                if result.get('status') in ('danger', 'warning'):
                     alert_system.trigger(machine, result, data)
 
             shared_state['last_scan'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            logging.info(f"دورة مراقبة مكتملة — {len(config['machines'])} آلة")
 
         except Exception as e:
-            logging.error(f"خطأ في حلقة المراقبة: {e}")
+            logging.error(f"خطأ في دورة المراقبة: {e}")
 
         stop_event.wait(interval)
 
 def main():
-    logging.info("=== بدء تشغيل نظام CVFPM ===")
-    logging.info("المطور: Mostafa Eisaa | 775166114")
+    logging.info("=== بدء تشغيل نظام CVFPM الاحترافي ===")
+    
+    # 1. تحميل الإعدادات
+    try:
+        config = load_config()
+    except Exception as e:
+        logging.error(f"فشل تحميل الإعدادات: {e}")
+        return
 
-    config = load_config()
-    config_ref = [config]       # قائمة بعنصر واحد → يمكن تعديلها من الخيوط
+    config_ref = [config] # مرجع للإعدادات لدعم التحديث الحي
 
+    # 2. تهيئة الحالة المشتركة والمحركات
     shared_state = {
         'machines': {},
         'alerts': [],
         'last_scan': None,
-        'config_ref': config_ref   # يتيح للـ API الوصول للـ config
+        'config_ref': config_ref
     }
 
-    ai_engine    = AIEngine(config)
+    ai_engine = AIEngine(config)
     alert_system = AlertSystem(config, shared_state)
-
     stop_event = threading.Event()
 
-    # خيط المراقبة
-    t = threading.Thread(
+    # 3. تشغيل خيط المراقبة في الخلفية
+    monitor_thread = threading.Thread(
         target=monitoring_loop,
         args=(config_ref, ai_engine, alert_system, shared_state, stop_event),
         daemon=True
     )
-    t.start()
-    logging.info("خيط المراقبة بدأ")
+    monitor_thread.start()
 
-    # تشغيل لوحة الويب
-    app  = create_app(config_ref, shared_state)
-    port = config.get('dashboard_port', 5000)
-    logging.info(f"لوحة التحكم: http://0.0.0.0:{port}")
+    # 4. تشغيل لوحة الويب (Flask)
+    app = create_app(config_ref, shared_state)
+    
+    # 🔥 أهم جزء لـ Render: الحصول على البورت من متغيرات البيئة
+    port = int(os.environ.get("PORT", config.get('dashboard_port', 5000)))
+    
+    logging.info(f"لوحة التحكم تعمل على الرابط: http://0.0.0.0:{port}")
 
-    # إيقاف نظيف
-    def shutdown(sig, frame):
-        logging.info("إيقاف النظام...")
+    # إعداد إيقاف النظام بشكل نظيف
+    def shutdown_handler(sig, frame):
+        logging.info("جاري إغلاق النظام...")
         stop_event.set()
         sys.exit(0)
 
-    signal.signal(signal.SIGINT,  shutdown)
-    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT,  shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_handler)
 
-    # Flask بإعدادات إنتاج (سريعة)
+    # تشغيل السيرفر
     app.run(
-        host='0.0.0.0',
-        port=port,
-        debug=False,
-        threaded=True,          # ← كل طلب في خيط منفصل = استجابة سريعة
-        use_reloader=False
-    )
-
-if __name__ == '__main__':
-    main()
+        host='0.0.0.
